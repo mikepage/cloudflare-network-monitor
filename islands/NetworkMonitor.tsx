@@ -174,7 +174,6 @@ export default function NetworkMonitor() {
   const selectedAsn = useSignal<number | null>(null);
   const selectedResult = useSignal<CheckResponse | null>(null);
   const customAsn = useSignal("");
-  const filterCountry = useSignal<string>("all");
 
   useEffect(() => {
     fetch("/api/check")
@@ -221,12 +220,6 @@ export default function NetworkMonitor() {
 
     try {
       for (const isp of isps.value) {
-        if (
-          filterCountry.value !== "all" &&
-          isp.country !== filterCountry.value
-        ) {
-          continue;
-        }
         loadingAsn.value = isp.asn;
         try {
           const resp = await fetch(`/api/check?asn=${isp.asn}`);
@@ -254,13 +247,6 @@ export default function NetworkMonitor() {
     }
     await checkSingleIsp(asn);
   };
-
-  const filteredIsps = isps.value.filter(
-    (isp) =>
-      filterCountry.value === "all" || isp.country === filterCountry.value,
-  );
-
-  const countries = [...new Set(isps.value.map((i) => i.country))];
 
   return (
     <div class="w-full">
@@ -297,46 +283,28 @@ export default function NetworkMonitor() {
             </button>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-4">
-          <div class="flex items-center gap-2">
-            <label class="text-xs text-[#666]">Filter</label>
-            <select
-              value={filterCountry.value}
-              onChange={(e) =>
-                (filterCountry.value = (e.target as HTMLSelectElement).value)}
-              class="px-3 py-1.5 border border-[#ddd] rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="all">All Countries</option>
-              {countries.map((c) => (
-                <option key={c} value={c}>
-                  {COUNTRY_FLAGS[c]} {COUNTRY_NAMES[c] ?? c}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div class="flex items-center gap-3 text-xs text-[#999]">
-            <span>Visibility:</span>
-            <span class="flex items-center gap-1">
-              <span class="inline-block w-2 h-2 rounded-full bg-red-400" />{" "}
-              0-500
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="inline-block w-2 h-2 rounded-full bg-orange-400" />{" "}
-              500-1k
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="inline-block w-2 h-2 rounded-full bg-yellow-400" />{" "}
-              1-2k
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="inline-block w-2 h-2 rounded-full bg-green-400" />{" "}
-              2-3k
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="inline-block w-2 h-2 rounded-full bg-green-600" />{" "}
-              3k+
-            </span>
-          </div>
+        <div class="flex items-center gap-3 text-xs text-[#999]">
+          <span>Visibility:</span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-red-400" />{" "}
+            0-500
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-orange-400" />{" "}
+            500-1k
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-yellow-400" />{" "}
+            1-2k
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-400" />{" "}
+            2-3k
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-600" />{" "}
+            3k+
+          </span>
         </div>
       </div>
 
@@ -360,7 +328,7 @@ export default function NetworkMonitor() {
 
       {/* ISP Grid */}
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {filteredIsps.map((isp) => {
+        {isps.value.map((isp) => {
           const result = results.value.get(isp.asn);
           const isLoading = loadingAsn.value === isp.asn;
           const isSelected = selectedAsn.value === isp.asn;
@@ -390,21 +358,14 @@ export default function NetworkMonitor() {
               </div>
               <div class="flex items-center justify-between mb-2">
                 <span class="text-xs text-[#999]">AS{isp.asn}</span>
-                {result && (
-                  <div class="flex items-center gap-2">
-                    {result.peering.regionalIxp?.peered && (
-                      <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
-                        {result.peering.regionalIxp.name}
-                      </span>
-                    )}
-                    {!result.peering.likelyDirectPeering && (
-                      <span class="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-500">
-                        no direct peering
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
+              {result && (
+                <div class="flex flex-wrap gap-1 mb-2">
+                  {result.peering.allIxps.map((ixp) => (
+                    <IxpBadge key={ixp.id} ixp={ixp} />
+                  ))}
+                </div>
+              )}
               {result && (
                 <VisBar buckets={result.cfPrefixes.visibilityBuckets} />
               )}
@@ -420,7 +381,7 @@ export default function NetworkMonitor() {
             <div class="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
             <span class="text-sm text-[#666]">
               Checking AS{loadingAsn.value}... ({results.value.size}/
-              {filteredIsps.length} done)
+              {isps.value.length} done)
             </span>
           </div>
         </div>

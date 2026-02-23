@@ -60,18 +60,18 @@ const ISP_LIST: IspInfo[] = [
   { asn: 5410, name: "Bouygues Telecom", country: "FR" },
 ];
 
-// --- Caching ---
+// --- Deno KV persistence ---
 
-let bgpCache: { data: BgpEntry[]; timestamp: number } | null = null;
-let cfIxCache: { ixIds: Set<number>; timestamp: number } | null = null;
-let ispIxCache: Map<number, { ixIds: Set<number>; ixCount: number }> =
-  new Map();
-let ispIxCacheTimestamp = 0;
+const kv = await Deno.openKv();
+
+const BGP_CACHE_TTL = 1800_000; // 30 min
+const PEERINGDB_CACHE_TTL = 86400_000; // 24h
+const RESULT_CACHE_TTL = 86400_000; // 24h
 
 async function fetchBgpTable(): Promise<BgpEntry[]> {
-  const now = Date.now();
-  if (bgpCache && now - bgpCache.timestamp < 1800_000) {
-    return bgpCache.data;
+  const cached = await kv.get<BgpEntry[]>(["bgp", "table"]);
+  if (cached.value) {
+    return cached.value;
   }
 
   const resp = await fetch("https://bgp.tools/table.jsonl", {
@@ -95,17 +95,14 @@ async function fetchBgpTable(): Promise<BgpEntry[]> {
     }
   }
 
-  bgpCache = { data: entries, timestamp: now };
+  await kv.set(["bgp", "table"], entries, { expireIn: BGP_CACHE_TTL });
   return entries;
 }
 
-// PeeringDB caches for 24h to respect rate limits (unauthenticated: ~20 req/min)
-const PEERINGDB_CACHE_TTL = 86400_000;
-
 async function fetchCloudflareIxIds(): Promise<Set<number>> {
-  const now = Date.now();
-  if (cfIxCache && now - cfIxCache.timestamp < PEERINGDB_CACHE_TTL) {
-    return cfIxCache.ixIds;
+  const cached = await kv.get<number[]>(["peeringdb", "cf"]);
+  if (cached.value) {
+    return new Set(cached.value);
   }
 
   try {
@@ -114,32 +111,33 @@ async function fetchCloudflareIxIds(): Promise<Set<number>> {
       { headers: { "User-Agent": USER_AGENT } },
     );
     if (!resp.ok) {
-      console.warn(`PeeringDB CF returned ${resp.status}, using cache`);
-      return cfIxCache?.ixIds ?? new Set();
+      console.warn(`PeeringDB CF returned ${resp.status}, no cache available`);
+      return new Set();
     }
     const data = await resp.json();
     if (data.meta?.error || !Array.isArray(data.data)) {
-      console.warn("PeeringDB CF rate limited, using cache");
-      return cfIxCache?.ixIds ?? new Set();
+      console.warn("PeeringDB CF rate limited, no cache available");
+      return new Set();
     }
     const ixIds = new Set<number>();
     for (const entry of data.data) {
       if (entry.ix_id) ixIds.add(entry.ix_id);
     }
-    cfIxCache = { ixIds, timestamp: now };
+    await kv.set(["peeringdb", "cf"], [...ixIds], {
+      expireIn: PEERINGDB_CACHE_TTL,
+    });
     return ixIds;
   } catch {
-    return cfIxCache?.ixIds ?? new Set();
+    return new Set();
   }
 }
 
 async function fetchIspIxData(
   asn: number,
 ): Promise<{ ixIds: Set<number>; ixCount: number }> {
-  const now = Date.now();
-  const cached = ispIxCache.get(asn);
-  if (cached && now - ispIxCacheTimestamp < PEERINGDB_CACHE_TTL) {
-    return cached;
+  const cached = await kv.get<number[]>(["peeringdb", "isp", asn]);
+  if (cached.value) {
+    return { ixIds: new Set(cached.value), ixCount: cached.value.length };
   }
 
   try {
@@ -148,24 +146,24 @@ async function fetchIspIxData(
       { headers: { "User-Agent": USER_AGENT } },
     );
     if (!resp.ok) {
-      console.warn(`PeeringDB AS${asn} returned ${resp.status}, using cache`);
-      return cached ?? { ixIds: new Set(), ixCount: 0 };
+      console.warn(`PeeringDB AS${asn} returned ${resp.status}, no cache available`);
+      return { ixIds: new Set(), ixCount: 0 };
     }
     const data = await resp.json();
     if (data.meta?.error || !Array.isArray(data.data)) {
-      console.warn(`PeeringDB AS${asn} rate limited, using cache`);
-      return cached ?? { ixIds: new Set(), ixCount: 0 };
+      console.warn(`PeeringDB AS${asn} rate limited, no cache available`);
+      return { ixIds: new Set(), ixCount: 0 };
     }
     const ixIds = new Set<number>();
     for (const entry of data.data) {
       if (entry.ix_id) ixIds.add(entry.ix_id);
     }
-    const result = { ixIds, ixCount: ixIds.size };
-    ispIxCache.set(asn, result);
-    ispIxCacheTimestamp = now;
-    return result;
+    await kv.set(["peeringdb", "isp", asn], [...ixIds], {
+      expireIn: PEERINGDB_CACHE_TTL,
+    });
+    return { ixIds, ixCount: ixIds.size };
   } catch {
-    return cached ?? { ixIds: new Set(), ixCount: 0 };
+    return { ixIds: new Set(), ixCount: 0 };
   }
 }
 
@@ -240,6 +238,18 @@ export const handler = define.handlers({
       }
 
       const ispInfo = ISP_LIST.find((i) => i.asn === targetAsn);
+
+      // Check for cached result first
+      const cachedResult = await kv.get<IspCheckResult>(["result", targetAsn]);
+      if (cachedResult.value) {
+        const queryTime = Math.round(performance.now() - startTime);
+        return Response.json({
+          success: true,
+          result: cachedResult.value,
+          queryTime,
+          cached: true,
+        });
+      }
 
       // Fetch all data in parallel
       const [bgpTable, cfIxIds, ispIxData] = await Promise.all([
@@ -358,6 +368,10 @@ export const handler = define.handlers({
         },
         score,
       };
+
+      await kv.set(["result", targetAsn], result, {
+        expireIn: RESULT_CACHE_TTL,
+      });
 
       return Response.json({
         success: true,
