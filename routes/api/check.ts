@@ -183,8 +183,8 @@ export const handler = define.handlers({
     try {
       const startTime = performance.now();
 
-      // Check for cached result
-      const cachedResult = await kv.get<CheckResult>(["result", "ixps"]);
+      // Check for cached result (v2 includes peerAs)
+      const cachedResult = await kv.get<CheckResult>(["result", "ixps", "v2"]);
       if (cachedResult.value) {
         const queryTime = Math.round(performance.now() - startTime);
         return Response.json({
@@ -274,7 +274,7 @@ export const handler = define.handlers({
 
       // Only cache if we got valid CF IXP data
       if (cfIxIds.size > 0) {
-        await kv.set(["result", "ixps"], result, {
+        await kv.set(["result", "ixps", "v2"], result, {
           expireIn: RESULT_CACHE_TTL,
         });
       }
