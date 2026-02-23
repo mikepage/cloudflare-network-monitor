@@ -23,19 +23,19 @@ interface RegionalIxp {
 const REGIONAL_IXPS: RegionalIxp[] = [
   { id: 26, name: "AMS-IX", country: "NL" },
   { id: 59, name: "BNIX", country: "BE" },
-  { id: 31, name: "DE-CIX Frankfurt", country: "DE" },
-  { id: 297, name: "LU-CIX", country: "LU" },
-  { id: 359, name: "France-IX Paris", country: "FR" },
-  { id: 18, name: "LINX LON1", country: "GB" },
-  { id: 48, name: "NL-ix", country: "NL" },
-  { id: 87, name: "DE-CIX Munich", country: "DE" },
-  { id: 49, name: "MIX-IT", country: "IT" },
-  { id: 60, name: "Netnod Stockholm", country: "SE" },
-  { id: 35, name: "SwissIX", country: "CH" },
-  { id: 64, name: "ESPANIX", country: "ES" },
-  { id: 74, name: "VIX", country: "AT" },
-  { id: 69, name: "DE-CIX Hamburg", country: "DE" },
   { id: 58, name: "CIXP", country: "CH" },
+  { id: 31, name: "DE-CIX FRA", country: "DE" },
+  { id: 69, name: "DE-CIX HAM", country: "DE" },
+  { id: 87, name: "DE-CIX MUC", country: "DE" },
+  { id: 64, name: "ESPANIX", country: "ES" },
+  { id: 359, name: "FranceIX PAR", country: "FR" },
+  { id: 18, name: "LINX LON1", country: "GB" },
+  { id: 297, name: "LU-CIX", country: "LU" },
+  { id: 49, name: "MIX-IT", country: "IT" },
+  { id: 60, name: "Netnod STO", country: "SE" },
+  { id: 48, name: "NL-ix", country: "NL" },
+  { id: 35, name: "SwissIX", country: "CH" },
+  { id: 74, name: "VIX", country: "AT" },
 ];
 
 // Networks to check connectivity to Cloudflare
@@ -45,12 +45,12 @@ interface NetworkDef {
 }
 
 const NETWORKS: NetworkDef[] = [
-  { asn: 13335, name: "Cloudflare" },
-  { asn: 40401, name: "Backblaze" },
-  { asn: 202053, name: "UpCloud" },
-  { asn: 396982, name: "Google Cloud" },
   { asn: 16509, name: "AWS" },
   { asn: 8075, name: "Azure" },
+  { asn: 40401, name: "Backblaze" },
+  { asn: 13335, name: "Cloudflare" },
+  { asn: 396982, name: "Google Cloud" },
+  { asn: 202053, name: "UpCloud" },
 ];
 
 // --- Deno KV persistence ---
@@ -211,10 +211,11 @@ export const handler = define.handlers({
           asn: net.asn,
           name: net.name,
           present: networkIxIds[i].has(ixp.id),
-        })),
+        })).sort((a, b) => Number(b.present) - Number(a.present) || a.name.localeCompare(b.name)),
       }));
 
-      const cfIxIds = networkIxIds[0]; // Cloudflare is first in NETWORKS
+      const cfIdx = NETWORKS.findIndex((n) => n.asn === CLOUDFLARE_AS);
+      const cfIxIds = networkIxIds[cfIdx];
 
       // BGP stats
       const cfBgpEntries = bgpTable.filter((e) => e.ASN === CLOUDFLARE_AS);
