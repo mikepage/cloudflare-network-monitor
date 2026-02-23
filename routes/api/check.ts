@@ -23,19 +23,19 @@ interface RegionalIxp {
 const REGIONAL_IXPS: RegionalIxp[] = [
   { id: 26, name: "AMS-IX", country: "NL" },
   { id: 59, name: "BNIX", country: "BE" },
-  { id: 58, name: "CIXP", country: "CH" },
+  { id: 33, name: "CIXP", country: "CH" },
   { id: 31, name: "DE-CIX FRA", country: "DE" },
-  { id: 69, name: "DE-CIX HAM", country: "DE" },
-  { id: 87, name: "DE-CIX MUC", country: "DE" },
-  { id: 64, name: "ESPANIX", country: "ES" },
+  { id: 74, name: "DE-CIX HAM", country: "DE" },
+  { id: 248, name: "DE-CIX MUC", country: "DE" },
+  { id: 63, name: "ESPANIX", country: "ES" },
   { id: 359, name: "FranceIX PAR", country: "FR" },
   { id: 18, name: "LINX LON1", country: "GB" },
   { id: 297, name: "LU-CIX", country: "LU" },
   { id: 49, name: "MIX-IT", country: "IT" },
-  { id: 60, name: "Netnod STO", country: "SE" },
+  { id: 70, name: "Netnod STO", country: "SE" },
   { id: 48, name: "NL-ix", country: "NL" },
   { id: 35, name: "SwissIX", country: "CH" },
-  { id: 74, name: "VIX", country: "AT" },
+  { id: 50, name: "VIX", country: "AT" },
 ];
 
 // Networks to check connectivity to Cloudflare
