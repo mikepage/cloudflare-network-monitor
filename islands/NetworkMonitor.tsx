@@ -14,11 +14,22 @@ interface VisibilityBucket {
   count: number;
 }
 
+interface IxpStatus {
+  id: number;
+  name: string;
+  country: string;
+  cfPresent: boolean;
+  ispPresent: boolean;
+  peered: boolean;
+}
+
 interface PeeringInfo {
   sharedIxps: number;
   ispIxps: number;
   cfIxps: number;
   likelyDirectPeering: boolean;
+  regionalIxp: IxpStatus | null;
+  allIxps: IxpStatus[];
 }
 
 interface IspResult {
@@ -116,6 +127,41 @@ function VisBar({ buckets }: { buckets: VisibilityBucket[] }) {
         );
       })}
     </div>
+  );
+}
+
+function IxpBadge({ ixp }: { ixp: IxpStatus }) {
+  if (ixp.peered) {
+    return (
+      <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-100 text-green-700">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
+        {ixp.name}
+      </span>
+    );
+  }
+  if (ixp.ispPresent && !ixp.cfPresent) {
+    return (
+      <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+        <span class="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+        {ixp.name}
+        <span class="text-[10px]">(CF missing)</span>
+      </span>
+    );
+  }
+  if (!ixp.ispPresent && ixp.cfPresent) {
+    return (
+      <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-600">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
+        {ixp.name}
+        <span class="text-[10px]">(ISP missing)</span>
+      </span>
+    );
+  }
+  return (
+    <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[#f0f0f0] text-[#999]">
+      <span class="w-1.5 h-1.5 rounded-full bg-[#ccc]" />
+      {ixp.name}
+    </span>
   );
 }
 
@@ -346,15 +392,16 @@ export default function NetworkMonitor() {
                 <span class="text-xs text-[#999]">AS{isp.asn}</span>
                 {result && (
                   <div class="flex items-center gap-2">
-                    {result.peering.likelyDirectPeering && (
-                      <span class="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
-                        {result.peering.sharedIxps} shared IXP
-                        {result.peering.sharedIxps !== 1 ? "s" : ""}
+                    {result.peering.regionalIxp?.peered && (
+                      <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                        {result.peering.regionalIxp.name}
                       </span>
                     )}
-                    <span class="text-xs text-[#999]">
-                      {result.cfPrefixes.total.toLocaleString()} CF prefixes
-                    </span>
+                    {!result.peering.likelyDirectPeering && (
+                      <span class="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-500">
+                        no direct peering
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -426,14 +473,12 @@ export default function NetworkMonitor() {
               </div>
 
               {/* Stats grid */}
-              <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                 <div class="bg-white rounded-lg shadow p-4 text-center">
                   <div class="text-2xl font-medium text-[#111]">
                     {cf.total.toLocaleString()}
                   </div>
-                  <div class="text-xs text-[#999]">
-                    AS13335 Prefixes
-                  </div>
+                  <div class="text-xs text-[#999]">AS13335 Prefixes</div>
                 </div>
                 <div class="bg-white rounded-lg shadow p-4 text-center">
                   <div class="text-2xl font-medium text-blue-600">
@@ -454,17 +499,73 @@ export default function NetworkMonitor() {
                   <div class="text-xs text-[#999]">Avg Visibility</div>
                 </div>
                 <div class="bg-white rounded-lg shadow p-4 text-center">
-                  <div class="text-2xl font-medium text-[#999]">
-                    {cf.minVisibility.toLocaleString()}
-                  </div>
-                  <div class="text-xs text-[#999]">Min Visibility</div>
-                </div>
-                <div class="bg-white rounded-lg shadow p-4 text-center">
                   <div class="text-2xl font-medium text-blue-600">
                     {res.peering.sharedIxps}
                   </div>
                   <div class="text-xs text-[#999]">Shared IXPs</div>
                 </div>
+              </div>
+
+              {/* Regional IXP peering validation */}
+              <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <h3 class="text-xs font-medium text-[#666] uppercase tracking-wider mb-4">
+                  IXP Peering Status
+                </h3>
+                <div class="flex flex-wrap gap-3 mb-4">
+                  {res.peering.allIxps.map((ixp) => (
+                    <IxpBadge key={ixp.id} ixp={ixp} />
+                  ))}
+                </div>
+                {res.peering.regionalIxp && (
+                  <div
+                    class={`rounded-md p-3 ${
+                      res.peering.regionalIxp.peered
+                        ? "bg-green-50"
+                        : "bg-red-50"
+                    }`}
+                  >
+                    <p
+                      class={`text-sm ${
+                        res.peering.regionalIxp.peered
+                          ? "text-green-800"
+                          : "text-red-800"
+                      }`}
+                    >
+                      {res.peering.regionalIxp.peered ? (
+                        <>
+                          {res.name} peers with Cloudflare at{" "}
+                          <span class="font-medium">
+                            {res.peering.regionalIxp.name}
+                          </span>{" "}
+                          — direct peering in{" "}
+                          {COUNTRY_NAMES[res.peering.regionalIxp.country] ??
+                            res.peering.regionalIxp.country}
+                        </>
+                      ) : (
+                        <>
+                          {res.name} does{" "}
+                          <span class="font-medium">not</span> peer with
+                          Cloudflare at{" "}
+                          <span class="font-medium">
+                            {res.peering.regionalIxp.name}
+                          </span>
+                          .{" "}
+                          {!res.peering.likelyDirectPeering
+                            ? "Traffic to Cloudflare goes through transit providers, adding latency and cost."
+                            : `However, they share ${res.peering.sharedIxps} other IXP(s).`}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                )}
+                {!res.peering.likelyDirectPeering && (
+                  <p class="text-xs text-[#999] mt-3">
+                    ISPs without direct peering rely on transit providers to
+                    reach Cloudflare. This typically means higher latency,
+                    transit costs, and less control over routing. PeeringDB
+                    data may be incomplete — some ISPs peer privately.
+                  </p>
+                )}
               </div>
 
               {/* Visibility distribution */}
@@ -502,82 +603,13 @@ export default function NetworkMonitor() {
                 </div>
               </div>
 
-              {/* Peering info */}
-              <div
-                class={`border rounded-lg p-4 mb-6 ${
-                  res.peering.likelyDirectPeering
-                    ? "bg-green-50 border-green-200"
-                    : "bg-amber-50 border-amber-200"
-                }`}
-              >
-                <div class="flex items-start gap-3">
-                  <svg
-                    class={`w-5 h-5 shrink-0 mt-0.5 ${
-                      res.peering.likelyDirectPeering
-                        ? "text-green-600"
-                        : "text-amber-600"
-                    }`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    {res.peering.likelyDirectPeering ? (
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"
-                      />
-                    ) : (
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                      />
-                    )}
-                  </svg>
-                  <div>
-                    <p
-                      class={`text-sm font-medium ${
-                        res.peering.likelyDirectPeering
-                          ? "text-green-800"
-                          : "text-amber-800"
-                      }`}
-                    >
-                      {res.peering.likelyDirectPeering
-                        ? `Direct peering likely — ${res.peering.sharedIxps} shared IXP(s) with Cloudflare`
-                        : "No shared IXPs found via PeeringDB"}
-                    </p>
-                    <p
-                      class={`text-xs mt-1 ${
-                        res.peering.likelyDirectPeering
-                          ? "text-green-700"
-                          : "text-amber-700"
-                      }`}
-                    >
-                      {res.name} has {res.peering.ispIxps} IXP connection(s) in
-                      PeeringDB. Cloudflare is present at{" "}
-                      {res.peering.cfIxps} IXPs globally (open peering policy).
-                      {!res.peering.likelyDirectPeering &&
-                        " The ISP may peer with Cloudflare via private peering or transit, or PeeringDB data may be incomplete."}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               {/* Low visibility prefixes */}
               {cf.lowVisibility.length > 0 && (
                 <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
                   <div class="px-4 py-3 bg-[#fafafa] border-b border-[#eee]">
                     <h3 class="text-xs font-medium text-[#666] uppercase tracking-wider">
                       Low Visibility Prefixes — {cf.lowVisibility.length}{" "}
-                      prefix(es) seen by fewer than{" "}
-                      {Math.max(
-                        1000,
-                        Math.round(cf.avgVisibility * 0.5),
-                      ).toLocaleString()}{" "}
-                      peers
+                      prefix(es) below threshold
                     </h3>
                   </div>
                   <div class="overflow-x-auto">
@@ -625,9 +657,7 @@ export default function NetworkMonitor() {
                                   IPv{p.type === "v4" ? "4" : "6"}
                                 </span>
                               </td>
-                              <td class="px-4 py-3 text-[#999]">
-                                /{p.mask}
-                              </td>
+                              <td class="px-4 py-3 text-[#999]">/{p.mask}</td>
                               <td class="px-4 py-3 text-right">
                                 <span
                                   class={`text-sm ${
@@ -662,7 +692,7 @@ export default function NetworkMonitor() {
                   <p>
                     <span class="font-medium">BGP prefixes</span> are the
                     actual IP ranges that Cloudflare (AS13335) announces to
-                    the global routing table. These are sourced from{" "}
+                    the global routing table, sourced from{" "}
                     <a
                       href="https://bgp.tools/kb/api"
                       target="_blank"
@@ -671,19 +701,18 @@ export default function NetworkMonitor() {
                     >
                       bgp.tools
                     </a>{" "}
-                    (updated every ~30 min).
+                    (updated ~30 min).
                   </p>
                   <p>
                     <span class="font-medium">Visibility</span> is the number
-                    of bgp.tools peer sessions that observe each route. Higher
-                    visibility means better global propagation. Prefixes with
-                    low visibility may indicate routing issues or recent
-                    announcements that haven't fully propagated.
+                    of bgp.tools peer sessions that observe each route. Low
+                    visibility may indicate routing issues or recent
+                    announcements still propagating.
                   </p>
                   <p>
-                    <span class="font-medium">Shared IXPs</span> are Internet
-                    Exchange Points where both the ISP and Cloudflare are
-                    present (via{" "}
+                    <span class="font-medium">IXP peering</span> is checked
+                    against regional IXPs (AMS-IX, BNIX, DE-CIX Frankfurt,
+                    LU-CIX, France-IX Paris) via{" "}
                     <a
                       href="https://www.peeringdb.com/"
                       target="_blank"
@@ -692,9 +721,10 @@ export default function NetworkMonitor() {
                     >
                       PeeringDB
                     </a>
-                    ). Shared IXP presence suggests direct peering, which
-                    means lower latency and no transit costs. Cloudflare has
-                    an open peering policy.
+                    . ISPs without direct peering reach Cloudflare via
+                    transit, which adds latency and cost. Cloudflare has an
+                    open peering policy at {res.peering.cfIxps || "350+"}
+                    {" "}IXPs globally.
                   </p>
                 </div>
               </div>
@@ -726,14 +756,14 @@ export default function NetworkMonitor() {
                   <th class="text-center px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
                     Score
                   </th>
-                  <th class="text-center px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
-                    CF Prefixes
-                  </th>
-                  <th class="text-center px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
-                    Avg Vis
+                  <th class="text-left px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
+                    Regional IXP
                   </th>
                   <th class="text-center px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
                     Shared IXPs
+                  </th>
+                  <th class="text-center px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider">
+                    Avg Vis
                   </th>
                   <th class="text-left px-4 py-3 text-xs font-medium text-[#666] uppercase tracking-wider w-36">
                     Visibility
@@ -758,14 +788,26 @@ export default function NetworkMonitor() {
                       <td class="px-4 py-3 text-center">
                         <ScoreBadge score={r.score} />
                       </td>
-                      <td class="px-4 py-3 text-center text-[#111]">
-                        {r.cfPrefixes.total.toLocaleString()}
-                      </td>
-                      <td class="px-4 py-3 text-center text-[#111]">
-                        {r.cfPrefixes.avgVisibility.toLocaleString()}
+                      <td class="px-4 py-3">
+                        {r.peering.regionalIxp ? (
+                          r.peering.regionalIxp.peered ? (
+                            <span class="text-xs text-green-700">
+                              {r.peering.regionalIxp.name}
+                            </span>
+                          ) : (
+                            <span class="text-xs text-red-500">
+                              not at {r.peering.regionalIxp.name}
+                            </span>
+                          )
+                        ) : (
+                          <span class="text-xs text-[#ccc]">-</span>
+                        )}
                       </td>
                       <td class="px-4 py-3 text-center text-blue-600">
                         {r.peering.sharedIxps}
+                      </td>
+                      <td class="px-4 py-3 text-center text-[#111]">
+                        {r.cfPrefixes.avgVisibility.toLocaleString()}
                       </td>
                       <td class="px-4 py-3">
                         <VisBar buckets={r.cfPrefixes.visibilityBuckets} />

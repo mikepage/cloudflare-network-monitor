@@ -11,6 +11,22 @@ interface BgpEntry {
   Hits: number;
 }
 
+// Regional IXPs — PeeringDB IX IDs
+// Cloudflare is present at all of these (open peering policy)
+interface RegionalIxp {
+  id: number;
+  name: string;
+  country: string;
+}
+
+const REGIONAL_IXPS: RegionalIxp[] = [
+  { id: 26, name: "AMS-IX", country: "NL" },
+  { id: 59, name: "BNIX", country: "BE" },
+  { id: 31, name: "DE-CIX Frankfurt", country: "DE" },
+  { id: 297, name: "LU-CIX", country: "LU" },
+  { id: 359, name: "France-IX Paris", country: "FR" },
+];
+
 interface IspInfo {
   asn: number;
   name: string;
@@ -168,6 +184,15 @@ interface VisibilityBucket {
   count: number;
 }
 
+interface IxpStatus {
+  id: number;
+  name: string;
+  country: string;
+  cfPresent: boolean;
+  ispPresent: boolean;
+  peered: boolean;
+}
+
 interface IspCheckResult {
   asn: number;
   name: string;
@@ -187,6 +212,8 @@ interface IspCheckResult {
     ispIxps: number;
     cfIxps: number;
     likelyDirectPeering: boolean;
+    regionalIxp: IxpStatus | null;
+    allIxps: IxpStatus[];
   };
   score: number;
 }
@@ -239,18 +266,15 @@ export const handler = define.handlers({
       const maxVisibility =
         visibilities.length > 0 ? Math.max(...visibilities) : 0;
 
-      // Find prefixes with low visibility (bottom 10% or under 1000 peers)
-      const visThreshold = Math.max(
-        1000,
-        avgVisibility * 0.5,
-      );
+      // Find prefixes with low visibility
+      const visThreshold = Math.max(1000, avgVisibility * 0.5);
       const lowVisibility: CfPrefixInfo[] = cfBgpEntries
         .filter((e) => e.Hits < visThreshold)
         .sort((a, b) => a.Hits - b.Hits)
         .slice(0, 50)
         .map((e) => ({
           prefix: e.CIDR,
-          type: e.CIDR.includes(":") ? "v6" as const : "v4" as const,
+          type: e.CIDR.includes(":") ? ("v6" as const) : ("v4" as const),
           visibility: e.Hits,
           mask: parseInt(e.CIDR.split("/")[1]),
         }));
@@ -276,23 +300,44 @@ export const handler = define.handlers({
         cfIxIds.has(id)
       ).length;
 
-      // Score: based on peering quality + BGP health
-      // All CF prefixes being announced is baseline (they all come from bgp.tools AS13335)
-      // Score focuses on: peering (shared IXPs) + visibility health (low-vis prefixes)
+      // Regional IXP check — find the primary IXP for this ISP's country
+      const ispCountry = ispInfo?.country ?? "??";
+      const allIxpStatuses: IxpStatus[] = REGIONAL_IXPS.map((ixp) => ({
+        id: ixp.id,
+        name: ixp.name,
+        country: ixp.country,
+        cfPresent: cfIxIds.has(ixp.id),
+        ispPresent: ispIxData.ixIds.has(ixp.id),
+        peered: cfIxIds.has(ixp.id) && ispIxData.ixIds.has(ixp.id),
+      }));
+
+      // Primary regional IXP for this ISP's country
+      const regionalIxp =
+        allIxpStatuses.find((ix) => ix.country === ispCountry) ?? null;
+
+      // Score: peering is the main factor for ISP relevance
+      // - Regional IXP peering: 40 points
+      // - Any shared IXP: 20 points
+      // - BGP visibility health: up to 40 points
       const lowVisRatio =
         cfBgpEntries.length > 0
           ? lowVisibility.length / cfBgpEntries.length
           : 0;
-      const healthScore = Math.round((1 - lowVisRatio) * 80);
-      const peeringScore = sharedIxps > 0 ? Math.min(sharedIxps * 5, 20) : 0;
-      const score = Math.min(100, healthScore + peeringScore);
+      const healthScore = Math.round((1 - lowVisRatio) * 40);
+      const regionalPeeringScore = regionalIxp?.peered ? 40 : 0;
+      const anyPeeringScore =
+        sharedIxps > 0 ? Math.min(sharedIxps * 10, 20) : 0;
+      const score = Math.min(
+        100,
+        healthScore + regionalPeeringScore + anyPeeringScore,
+      );
 
       const queryTime = Math.round(performance.now() - startTime);
 
       const result: IspCheckResult = {
         asn: targetAsn,
         name: ispInfo?.name ?? `AS${targetAsn}`,
-        country: ispInfo?.country ?? "??",
+        country: ispCountry,
         cfPrefixes: {
           total: cfBgpEntries.length,
           v4: v4Prefixes.length,
@@ -308,6 +353,8 @@ export const handler = define.handlers({
           ispIxps: ispIxData.ixCount,
           cfIxps: cfIxIds.size,
           likelyDirectPeering: sharedIxps > 0,
+          regionalIxp,
+          allIxps: allIxpStatuses,
         },
         score,
       };
