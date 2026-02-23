@@ -26,13 +26,14 @@ const REGIONAL_IXPS: RegionalIxp[] = [
   { id: 359, name: "France-IX Paris", country: "FR" },
 ];
 
-// Networks to check IXP presence for
+// Networks to check connectivity to Cloudflare
 interface NetworkDef {
   asn: number;
   name: string;
 }
 
 const NETWORKS: NetworkDef[] = [
+  { asn: 13335, name: "Cloudflare" },
   { asn: 40401, name: "Backblaze" },
   { asn: 202053, name: "UpCloud" },
 ];
@@ -118,17 +119,17 @@ async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
 
 // --- Types ---
 
+interface NetworkPresence {
+  asn: number;
+  name: string;
+  present: boolean;
+}
+
 interface IxpResult {
   id: number;
   name: string;
   country: string;
-}
-
-interface NetworkResult {
-  asn: number;
-  name: string;
-  totalIxps: number;
-  regionalIxps: IxpResult[];
+  networks: NetworkPresence[];
 }
 
 interface CfPrefixInfo {
@@ -146,7 +147,6 @@ interface VisibilityBucket {
 
 interface CheckResult {
   ixps: IxpResult[];
-  networks: NetworkResult[];
   bgp: {
     total: number;
     v4: number;
@@ -166,7 +166,7 @@ export const handler = define.handlers({
       const startTime = performance.now();
 
       // Check for cached result
-      const cachedResult = await kv.get<CheckResult>(["result", "v3"]);
+      const cachedResult = await kv.get<CheckResult>(["result", "v4"]);
       if (cachedResult.value) {
         const queryTime = Math.round(performance.now() - startTime);
         return Response.json({
@@ -178,34 +178,24 @@ export const handler = define.handlers({
       }
 
       // Fetch all data in parallel
-      const [bgpTable, cfIxIds, ...networkIxIds] = await Promise.all([
+      const [bgpTable, ...networkIxIds] = await Promise.all([
         fetchBgpTable(),
-        fetchAsnIxIds(CLOUDFLARE_AS),
         ...NETWORKS.map((n) => fetchAsnIxIds(n.asn)),
       ]);
 
-      // Regional IXPs where Cloudflare is present
-      const ixps: IxpResult[] = REGIONAL_IXPS
-        .filter((ixp) => cfIxIds.has(ixp.id))
-        .map((ixp) => ({
-          id: ixp.id,
-          name: ixp.name,
-          country: ixp.country,
-        }));
-
-      // Network presence at regional IXPs
-      const networks: NetworkResult[] = NETWORKS.map((net, i) => {
-        const ixIds = networkIxIds[i];
-        const regionalIxps = REGIONAL_IXPS
-          .filter((ixp) => ixIds.has(ixp.id))
-          .map((ixp) => ({ id: ixp.id, name: ixp.name, country: ixp.country }));
-        return {
+      // Build IXP-centric view with per-network presence
+      const ixps: IxpResult[] = REGIONAL_IXPS.map((ixp) => ({
+        id: ixp.id,
+        name: ixp.name,
+        country: ixp.country,
+        networks: NETWORKS.map((net, i) => ({
           asn: net.asn,
           name: net.name,
-          totalIxps: ixIds.size,
-          regionalIxps,
-        };
-      });
+          present: networkIxIds[i].has(ixp.id),
+        })),
+      }));
+
+      const cfIxIds = networkIxIds[0]; // Cloudflare is first in NETWORKS
 
       // BGP stats
       const cfBgpEntries = bgpTable.filter((e) => e.ASN === CLOUDFLARE_AS);
@@ -253,7 +243,6 @@ export const handler = define.handlers({
 
       const result: CheckResult = {
         ixps,
-        networks,
         bgp: {
           total: cfBgpEntries.length,
           v4: v4Prefixes.length,
@@ -269,7 +258,7 @@ export const handler = define.handlers({
 
       // Only cache if we got valid CF IXP data
       if (cfIxIds.size > 0) {
-        await kv.set(["result", "v3"], result, {
+        await kv.set(["result", "v4"], result, {
           expireIn: RESULT_CACHE_TTL,
         });
       }
