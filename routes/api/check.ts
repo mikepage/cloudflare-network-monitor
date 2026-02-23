@@ -4,6 +4,7 @@ const USER_AGENT =
   "cloudflare-network-monitor/1.0 - github.com/mikepage/cloudflare-network-monitor";
 
 const CLOUDFLARE_AS = 13335;
+const PEER_AS = 40401;
 
 interface BgpEntry {
   CIDR: string;
@@ -92,7 +93,43 @@ async function fetchCloudflareIxIds(): Promise<Set<number>> {
     for (const entry of data.data) {
       if (entry.ix_id) ixIds.add(entry.ix_id);
     }
-    await kv.set(["peeringdb", "cf"], [...ixIds], {
+    // Only cache if we got real data (CF is at 300+ IXPs)
+    if (ixIds.size > 0) {
+      await kv.set(["peeringdb", "cf"], [...ixIds], {
+        expireIn: PEERINGDB_CACHE_TTL,
+      });
+    }
+    return ixIds;
+  } catch {
+    return new Set();
+  }
+}
+
+async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
+  const cached = await kv.get<number[]>(["peeringdb", "asn", asn]);
+  if (cached.value) {
+    return new Set(cached.value);
+  }
+
+  try {
+    const resp = await fetch(
+      `https://www.peeringdb.com/api/netixlan?asn=${asn}`,
+      { headers: { "User-Agent": USER_AGENT } },
+    );
+    if (!resp.ok) {
+      console.warn(`PeeringDB AS${asn} returned ${resp.status}, no cache available`);
+      return new Set();
+    }
+    const data = await resp.json();
+    if (data.meta?.error || !Array.isArray(data.data)) {
+      console.warn(`PeeringDB AS${asn} rate limited, no cache available`);
+      return new Set();
+    }
+    const ixIds = new Set<number>();
+    for (const entry of data.data) {
+      if (entry.ix_id) ixIds.add(entry.ix_id);
+    }
+    await kv.set(["peeringdb", "asn", asn], [...ixIds], {
       expireIn: PEERINGDB_CACHE_TTL,
     });
     return ixIds;
@@ -108,6 +145,8 @@ interface IxpResult {
   name: string;
   country: string;
   cfPresent: boolean;
+  peerPresent: boolean;
+  peered: boolean;
 }
 
 interface CfPrefixInfo {
@@ -124,6 +163,7 @@ interface VisibilityBucket {
 }
 
 interface CheckResult {
+  peerAs: number;
   ixps: IxpResult[];
   bgp: {
     total: number;
@@ -155,10 +195,11 @@ export const handler = define.handlers({
         });
       }
 
-      // Fetch BGP table and CF IXP presence in parallel
-      const [bgpTable, cfIxIds] = await Promise.all([
+      // Fetch BGP table, CF IXP presence, and peer IXP presence in parallel
+      const [bgpTable, cfIxIds, peerIxIds] = await Promise.all([
         fetchBgpTable(),
         fetchCloudflareIxIds(),
+        fetchAsnIxIds(PEER_AS),
       ]);
 
       // IXP presence
@@ -167,6 +208,8 @@ export const handler = define.handlers({
         name: ixp.name,
         country: ixp.country,
         cfPresent: cfIxIds.has(ixp.id),
+        peerPresent: peerIxIds.has(ixp.id),
+        peered: cfIxIds.has(ixp.id) && peerIxIds.has(ixp.id),
       }));
 
       // BGP stats
@@ -214,6 +257,7 @@ export const handler = define.handlers({
       }
 
       const result: CheckResult = {
+        peerAs: PEER_AS,
         ixps,
         bgp: {
           total: cfBgpEntries.length,
@@ -228,9 +272,12 @@ export const handler = define.handlers({
         cfIxpsGlobal: cfIxIds.size,
       };
 
-      await kv.set(["result", "ixps"], result, {
-        expireIn: RESULT_CACHE_TTL,
-      });
+      // Only cache if we got valid CF IXP data
+      if (cfIxIds.size > 0) {
+        await kv.set(["result", "ixps"], result, {
+          expireIn: RESULT_CACHE_TTL,
+        });
+      }
 
       const queryTime = Math.round(performance.now() - startTime);
       return Response.json({

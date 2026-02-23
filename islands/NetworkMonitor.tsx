@@ -19,9 +19,12 @@ interface IxpResult {
   name: string;
   country: string;
   cfPresent: boolean;
+  peerPresent: boolean;
+  peered: boolean;
 }
 
 interface CheckData {
+  peerAs: number;
   ixps: IxpResult[];
   bgp: {
     total: number;
@@ -128,7 +131,7 @@ export default function NetworkMonitor() {
 
   if (!data.value) return null;
 
-  const { ixps, bgp, cfIxpsGlobal, queryTime } = data.value;
+  const { peerAs, ixps, bgp, cfIxpsGlobal, queryTime } = data.value;
 
   return (
     <div class="w-full">
@@ -137,32 +140,44 @@ export default function NetworkMonitor() {
         {ixps.map((ixp) => (
           <div
             key={ixp.id}
-            class="bg-white rounded-lg shadow p-5"
+            class={`bg-white rounded-lg shadow p-5 border-2 ${
+              ixp.peered ? "border-green-200" : "border-transparent"
+            }`}
           >
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-2">
                 <span class="text-lg">
                   {COUNTRY_FLAGS[ixp.country] ?? ""}
                 </span>
-                <span class="text-sm font-medium text-[#111]">
-                  {ixp.name}
-                </span>
+                <div>
+                  <span class="text-sm font-medium text-[#111] block">
+                    {ixp.name}
+                  </span>
+                  <span class="text-xs text-[#999]">
+                    {COUNTRY_NAMES[ixp.country] ?? ixp.country}
+                  </span>
+                </div>
               </div>
-              {ixp.cfPresent ? (
+              {ixp.peered ? (
                 <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-100 text-green-700">
                   <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
-                  CF present
+                  Peered
                 </span>
               ) : (
                 <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-600">
                   <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
-                  CF absent
+                  Not peered
                 </span>
               )}
             </div>
-            <span class="text-xs text-[#999]">
-              {COUNTRY_NAMES[ixp.country] ?? ixp.country}
-            </span>
+            <div class="flex gap-3 text-xs">
+              <span class={ixp.cfPresent ? "text-green-600" : "text-red-500"}>
+                {ixp.cfPresent ? "CF present" : "CF absent"}
+              </span>
+              <span class={ixp.peerPresent ? "text-green-600" : "text-red-500"}>
+                {ixp.peerPresent ? `AS${peerAs} present` : `AS${peerAs} absent`}
+              </span>
+            </div>
           </div>
         ))}
       </div>
