@@ -156,7 +156,7 @@ export default function NetworkMonitor() {
               </div>
             </div>
             <div class="space-y-1.5">
-              {ixp.networks.map((net) => (
+              {[...ixp.networks].sort((a, b) => Number(b.present) - Number(a.present)).map((net) => (
                 <div
                   key={net.asn}
                   class="flex items-center justify-between text-xs"
