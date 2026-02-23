@@ -14,9 +14,8 @@ export default define.page(function Home() {
             Cloudflare Network Monitor
           </h1>
           <p class="text-[#666] text-sm mb-8">
-            Monitor Cloudflare (AS13335) BGP prefix health and ISP peering
-            status. Shows prefix visibility from bgp.tools and shared IXPs
-            via PeeringDB.
+            Monitor Cloudflare (AS13335) BGP prefix visibility from bgp.tools
+            and network connectivity at regional IXPs via PeeringDB.
           </p>
           <NetworkMonitor />
         </div>
