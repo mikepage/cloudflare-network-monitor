@@ -26,6 +26,16 @@ const REGIONAL_IXPS: RegionalIxp[] = [
   { id: 31, name: "DE-CIX Frankfurt", country: "DE" },
   { id: 297, name: "LU-CIX", country: "LU" },
   { id: 359, name: "France-IX Paris", country: "FR" },
+  { id: 18, name: "LINX LON1", country: "GB" },
+  { id: 48, name: "NL-ix", country: "NL" },
+  { id: 87, name: "DE-CIX Munich", country: "DE" },
+  { id: 49, name: "MIX-IT", country: "IT" },
+  { id: 60, name: "Netnod Stockholm", country: "SE" },
+  { id: 35, name: "SwissIX", country: "CH" },
+  { id: 64, name: "ESPANIX", country: "ES" },
+  { id: 74, name: "VIX", country: "AT" },
+  { id: 69, name: "DE-CIX Hamburg", country: "DE" },
+  { id: 58, name: "CIXP", country: "CH" },
 ];
 
 // Networks to check connectivity to Cloudflare

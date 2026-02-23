@@ -50,6 +50,12 @@ const COUNTRY_FLAGS: Record<string, string> = {
   BE: "\u{1F1E7}\u{1F1EA}",
   LU: "\u{1F1F1}\u{1F1FA}",
   FR: "\u{1F1EB}\u{1F1F7}",
+  GB: "\u{1F1EC}\u{1F1E7}",
+  IT: "\u{1F1EE}\u{1F1F9}",
+  SE: "\u{1F1F8}\u{1F1EA}",
+  CH: "\u{1F1E8}\u{1F1ED}",
+  ES: "\u{1F1EA}\u{1F1F8}",
+  AT: "\u{1F1E6}\u{1F1F9}",
 };
 
 const COUNTRY_NAMES: Record<string, string> = {
@@ -58,6 +64,12 @@ const COUNTRY_NAMES: Record<string, string> = {
   BE: "Belgium",
   LU: "Luxembourg",
   FR: "France",
+  GB: "United Kingdom",
+  IT: "Italy",
+  SE: "Sweden",
+  CH: "Switzerland",
+  ES: "Spain",
+  AT: "Austria",
 };
 
 function VisBar({ buckets }: { buckets: VisibilityBucket[] }) {
