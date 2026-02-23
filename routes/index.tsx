@@ -14,9 +14,9 @@ export default define.page(function Home() {
             Cloudflare Network Monitor
           </h1>
           <p class="text-[#666] text-sm mb-8">
-            Check if ISPs properly route all Cloudflare IP prefixes via BGP.
-            Compares advertised prefixes from bgp.tools against official
-            Cloudflare IP ranges.
+            Monitor Cloudflare (AS13335) BGP prefix health and ISP peering
+            status. Shows prefix visibility from bgp.tools and shared IXPs
+            via PeeringDB.
           </p>
           <NetworkMonitor />
         </div>

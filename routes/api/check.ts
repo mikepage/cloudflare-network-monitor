@@ -44,113 +44,13 @@ const ISP_LIST: IspInfo[] = [
   { asn: 5410, name: "Bouygues Telecom", country: "FR" },
 ];
 
-// --- IP math helpers ---
-
-function parsePrefix(cidr: string): {
-  ip: string;
-  mask: number;
-  isV6: boolean;
-} {
-  const [ip, maskStr] = cidr.split("/");
-  return { ip, mask: parseInt(maskStr), isV6: ip.includes(":") };
-}
-
-function ipv4ToInt(ip: string): number {
-  const parts = ip.split(".").map(Number);
-  return (
-    ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
-  );
-}
-
-function ipv4PrefixContains(parent: string, child: string): boolean {
-  const p = parsePrefix(parent);
-  const c = parsePrefix(child);
-  if (p.isV6 || c.isV6) return false;
-  if (c.mask < p.mask) return false;
-  const parentStart = ipv4ToInt(p.ip);
-  const childStart = ipv4ToInt(c.ip);
-  const parentMask =
-    p.mask === 0 ? 0 : (0xffffffff << (32 - p.mask)) >>> 0;
-  return (parentStart & parentMask) === (childStart & parentMask);
-}
-
-function expandIPv6(ip: string): string {
-  let parts = ip.split(":");
-  const emptyIdx = parts.indexOf("");
-  if (emptyIdx !== -1) {
-    const before = parts.slice(0, emptyIdx);
-    const after = parts.slice(emptyIdx + 1).filter((p) => p !== "");
-    const fill = 8 - before.length - after.length;
-    parts = [...before, ...Array(fill).fill("0000"), ...after];
-  }
-  return parts.map((p) => p.padStart(4, "0")).join(":");
-}
-
-function ipv6ToBigInt(ip: string): bigint {
-  const expanded = expandIPv6(ip);
-  const hex = expanded.replace(/:/g, "");
-  return BigInt("0x" + hex);
-}
-
-function ipv6PrefixContains(parent: string, child: string): boolean {
-  const p = parsePrefix(parent);
-  const c = parsePrefix(child);
-  if (!p.isV6 || !c.isV6) return false;
-  if (c.mask < p.mask) return false;
-  const parentStart = ipv6ToBigInt(p.ip);
-  const childStart = ipv6ToBigInt(c.ip);
-  const mask =
-    p.mask === 0 ? 0n : ((1n << 128n) - 1n) << (128n - BigInt(p.mask));
-  return (parentStart & mask) === (childStart & mask);
-}
-
-function prefixContains(parent: string, child: string): boolean {
-  const p = parsePrefix(parent);
-  const c = parsePrefix(child);
-  if (p.isV6 !== c.isV6) return false;
-  if (p.isV6) return ipv6PrefixContains(parent, child);
-  return ipv4PrefixContains(parent, child);
-}
-
 // --- Caching ---
 
-// deno-lint-ignore no-explicit-any
 let bgpCache: { data: BgpEntry[]; timestamp: number } | null = null;
-let cfIpCache: { v4: string[]; v6: string[]; timestamp: number } | null = null;
 let cfIxCache: { ixIds: Set<number>; timestamp: number } | null = null;
 let ispIxCache: Map<number, { ixIds: Set<number>; ixCount: number }> =
   new Map();
 let ispIxCacheTimestamp = 0;
-
-async function fetchCloudflareIPs(): Promise<{ v4: string[]; v6: string[] }> {
-  const now = Date.now();
-  if (cfIpCache && now - cfIpCache.timestamp < 3600_000) {
-    return { v4: cfIpCache.v4, v6: cfIpCache.v6 };
-  }
-
-  const [v4Resp, v6Resp] = await Promise.all([
-    fetch("https://www.cloudflare.com/ips-v4/", {
-      headers: { "User-Agent": USER_AGENT },
-    }),
-    fetch("https://www.cloudflare.com/ips-v6/", {
-      headers: { "User-Agent": USER_AGENT },
-    }),
-  ]);
-
-  const v4 = (await v4Resp.text())
-    .trim()
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && l.includes("/"));
-  const v6 = (await v6Resp.text())
-    .trim()
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && l.includes("/"));
-
-  cfIpCache = { v4, v6, timestamp: now };
-  return { v4, v6 };
-}
 
 async function fetchBgpTable(): Promise<BgpEntry[]> {
   const now = Date.now();
@@ -183,24 +83,38 @@ async function fetchBgpTable(): Promise<BgpEntry[]> {
   return entries;
 }
 
+// PeeringDB caches for 24h to respect rate limits (unauthenticated: ~20 req/min)
+const PEERINGDB_CACHE_TTL = 86400_000;
+
 async function fetchCloudflareIxIds(): Promise<Set<number>> {
   const now = Date.now();
-  if (cfIxCache && now - cfIxCache.timestamp < 3600_000) {
+  if (cfIxCache && now - cfIxCache.timestamp < PEERINGDB_CACHE_TTL) {
     return cfIxCache.ixIds;
   }
 
-  const resp = await fetch(
-    `https://www.peeringdb.com/api/netixlan?asn=${CLOUDFLARE_AS}`,
-    { headers: { "User-Agent": USER_AGENT } },
-  );
-  const data = await resp.json();
-  const ixIds = new Set<number>();
-  for (const entry of data.data ?? []) {
-    if (entry.ix_id) ixIds.add(entry.ix_id);
+  try {
+    const resp = await fetch(
+      `https://www.peeringdb.com/api/netixlan?asn=${CLOUDFLARE_AS}`,
+      { headers: { "User-Agent": USER_AGENT } },
+    );
+    if (!resp.ok) {
+      console.warn(`PeeringDB CF returned ${resp.status}, using cache`);
+      return cfIxCache?.ixIds ?? new Set();
+    }
+    const data = await resp.json();
+    if (data.meta?.error || !Array.isArray(data.data)) {
+      console.warn("PeeringDB CF rate limited, using cache");
+      return cfIxCache?.ixIds ?? new Set();
+    }
+    const ixIds = new Set<number>();
+    for (const entry of data.data) {
+      if (entry.ix_id) ixIds.add(entry.ix_id);
+    }
+    cfIxCache = { ixIds, timestamp: now };
+    return ixIds;
+  } catch {
+    return cfIxCache?.ixIds ?? new Set();
   }
-
-  cfIxCache = { ixIds, timestamp: now };
-  return ixIds;
 }
 
 async function fetchIspIxData(
@@ -208,7 +122,7 @@ async function fetchIspIxData(
 ): Promise<{ ixIds: Set<number>; ixCount: number }> {
   const now = Date.now();
   const cached = ispIxCache.get(asn);
-  if (cached && now - ispIxCacheTimestamp < 3600_000) {
+  if (cached && now - ispIxCacheTimestamp < PEERINGDB_CACHE_TTL) {
     return cached;
   }
 
@@ -217,9 +131,17 @@ async function fetchIspIxData(
       `https://www.peeringdb.com/api/netixlan?asn=${asn}`,
       { headers: { "User-Agent": USER_AGENT } },
     );
+    if (!resp.ok) {
+      console.warn(`PeeringDB AS${asn} returned ${resp.status}, using cache`);
+      return cached ?? { ixIds: new Set(), ixCount: 0 };
+    }
     const data = await resp.json();
+    if (data.meta?.error || !Array.isArray(data.data)) {
+      console.warn(`PeeringDB AS${asn} rate limited, using cache`);
+      return cached ?? { ixIds: new Set(), ixCount: 0 };
+    }
     const ixIds = new Set<number>();
-    for (const entry of data.data ?? []) {
+    for (const entry of data.data) {
       if (entry.ix_id) ixIds.add(entry.ix_id);
     }
     const result = { ixIds, ixCount: ixIds.size };
@@ -227,37 +149,46 @@ async function fetchIspIxData(
     ispIxCacheTimestamp = now;
     return result;
   } catch {
-    return { ixIds: new Set(), ixCount: 0 };
+    return cached ?? { ixIds: new Set(), ixCount: 0 };
   }
 }
 
 // --- Types ---
 
-interface PrefixResult {
+interface CfPrefixInfo {
   prefix: string;
   type: "v4" | "v6";
-  bgpStatus: "announced" | "deaggregated" | "not-found";
-  bgpPrefixes: string[];
   visibility: number;
-  moreSpecificCount: number;
+  mask: number;
+}
+
+interface VisibilityBucket {
+  label: string;
+  min: number;
+  count: number;
 }
 
 interface IspCheckResult {
   asn: number;
   name: string;
   country: string;
-  prefixes: PrefixResult[];
-  totalPrefixes: number;
-  announced: number;
-  deaggregated: number;
-  notFound: number;
-  score: number;
+  cfPrefixes: {
+    total: number;
+    v4: number;
+    v6: number;
+    avgVisibility: number;
+    minVisibility: number;
+    maxVisibility: number;
+    lowVisibility: CfPrefixInfo[];
+    visibilityBuckets: VisibilityBucket[];
+  };
   peering: {
     sharedIxps: number;
     ispIxps: number;
     cfIxps: number;
     likelyDirectPeering: boolean;
   };
+  score: number;
 }
 
 export const handler = define.handlers({
@@ -284,63 +215,60 @@ export const handler = define.handlers({
       const ispInfo = ISP_LIST.find((i) => i.asn === targetAsn);
 
       // Fetch all data in parallel
-      const [cfIps, bgpTable, cfIxIds, ispIxData] = await Promise.all([
-        fetchCloudflareIPs(),
+      const [bgpTable, cfIxIds, ispIxData] = await Promise.all([
         fetchBgpTable(),
         fetchCloudflareIxIds(),
         fetchIspIxData(targetAsn),
       ]);
 
-      const allCfPrefixes = [...cfIps.v4, ...cfIps.v6];
-
-      // Get all Cloudflare-originated prefixes from BGP table
+      // Get all Cloudflare-originated prefixes from the global BGP table
       const cfBgpEntries = bgpTable.filter((e) => e.ASN === CLOUDFLARE_AS);
 
-      // Analyze each official Cloudflare prefix
-      const prefixResults: PrefixResult[] = [];
+      const v4Prefixes = cfBgpEntries.filter((e) => !e.CIDR.includes(":"));
+      const v6Prefixes = cfBgpEntries.filter((e) => e.CIDR.includes(":"));
 
-      for (const cfPrefix of allCfPrefixes) {
-        const isV6 = cfPrefix.includes(":");
-        const type: "v4" | "v6" = isV6 ? "v6" : "v4";
+      const visibilities = cfBgpEntries.map((e) => e.Hits);
+      const avgVisibility =
+        visibilities.length > 0
+          ? Math.round(
+              visibilities.reduce((a, b) => a + b, 0) / visibilities.length,
+            )
+          : 0;
+      const minVisibility =
+        visibilities.length > 0 ? Math.min(...visibilities) : 0;
+      const maxVisibility =
+        visibilities.length > 0 ? Math.max(...visibilities) : 0;
 
-        // Check exact match in BGP table
-        const exactMatch = cfBgpEntries.find((e) => e.CIDR === cfPrefix);
+      // Find prefixes with low visibility (bottom 10% or under 1000 peers)
+      const visThreshold = Math.max(
+        1000,
+        avgVisibility * 0.5,
+      );
+      const lowVisibility: CfPrefixInfo[] = cfBgpEntries
+        .filter((e) => e.Hits < visThreshold)
+        .sort((a, b) => a.Hits - b.Hits)
+        .slice(0, 50)
+        .map((e) => ({
+          prefix: e.CIDR,
+          type: e.CIDR.includes(":") ? "v6" as const : "v4" as const,
+          visibility: e.Hits,
+          mask: parseInt(e.CIDR.split("/")[1]),
+        }));
 
-        // Check for more-specific (deaggregated) announcements within this range
-        const moreSpecifics = cfBgpEntries.filter(
-          (e) => e.CIDR !== cfPrefix && prefixContains(cfPrefix, e.CIDR),
-        );
-
-        let bgpStatus: "announced" | "deaggregated" | "not-found";
-        const bgpPrefixes: string[] = [];
-        let visibility = 0;
-
-        if (exactMatch) {
-          bgpStatus = "announced";
-          bgpPrefixes.push(exactMatch.CIDR);
-          visibility = exactMatch.Hits;
-          // Also include more-specifics if any
-          for (const ms of moreSpecifics.slice(0, 10)) {
-            bgpPrefixes.push(ms.CIDR);
-          }
-        } else if (moreSpecifics.length > 0) {
-          bgpStatus = "deaggregated";
-          for (const ms of moreSpecifics.slice(0, 10)) {
-            bgpPrefixes.push(ms.CIDR);
-          }
-          visibility = Math.max(...moreSpecifics.map((e) => e.Hits));
-        } else {
-          bgpStatus = "not-found";
-        }
-
-        prefixResults.push({
-          prefix: cfPrefix,
-          type,
-          bgpStatus,
-          bgpPrefixes,
-          visibility,
-          moreSpecificCount: moreSpecifics.length,
-        });
+      // Visibility distribution buckets
+      const buckets: VisibilityBucket[] = [
+        { label: "0-500", min: 0, count: 0 },
+        { label: "500-1000", min: 500, count: 0 },
+        { label: "1000-2000", min: 1000, count: 0 },
+        { label: "2000-3000", min: 2000, count: 0 },
+        { label: "3000+", min: 3000, count: 0 },
+      ];
+      for (const e of cfBgpEntries) {
+        if (e.Hits >= 3000) buckets[4].count++;
+        else if (e.Hits >= 2000) buckets[3].count++;
+        else if (e.Hits >= 1000) buckets[2].count++;
+        else if (e.Hits >= 500) buckets[1].count++;
+        else buckets[0].count++;
       }
 
       // Calculate peering info
@@ -348,27 +276,16 @@ export const handler = define.handlers({
         cfIxIds.has(id)
       ).length;
 
-      const announced = prefixResults.filter(
-        (p) => p.bgpStatus === "announced",
-      ).length;
-      const deaggregated = prefixResults.filter(
-        (p) => p.bgpStatus === "deaggregated",
-      ).length;
-      const notFound = prefixResults.filter(
-        (p) => p.bgpStatus === "not-found",
-      ).length;
-      const totalPrefixes = prefixResults.length;
-
-      // Score based on: BGP health (are all prefixes announced?) + peering
-      const bgpHealthScore =
-        totalPrefixes > 0
-          ? ((announced + deaggregated) / totalPrefixes) * 100
+      // Score: based on peering quality + BGP health
+      // All CF prefixes being announced is baseline (they all come from bgp.tools AS13335)
+      // Score focuses on: peering (shared IXPs) + visibility health (low-vis prefixes)
+      const lowVisRatio =
+        cfBgpEntries.length > 0
+          ? lowVisibility.length / cfBgpEntries.length
           : 0;
-      const peeringBonus = sharedIxps > 0 ? Math.min(sharedIxps * 5, 20) : 0;
-      const score = Math.min(
-        100,
-        Math.round(bgpHealthScore * 0.8 + peeringBonus),
-      );
+      const healthScore = Math.round((1 - lowVisRatio) * 80);
+      const peeringScore = sharedIxps > 0 ? Math.min(sharedIxps * 5, 20) : 0;
+      const score = Math.min(100, healthScore + peeringScore);
 
       const queryTime = Math.round(performance.now() - startTime);
 
@@ -376,33 +293,29 @@ export const handler = define.handlers({
         asn: targetAsn,
         name: ispInfo?.name ?? `AS${targetAsn}`,
         country: ispInfo?.country ?? "??",
-        prefixes: prefixResults,
-        totalPrefixes,
-        announced,
-        deaggregated,
-        notFound,
-        score,
+        cfPrefixes: {
+          total: cfBgpEntries.length,
+          v4: v4Prefixes.length,
+          v6: v6Prefixes.length,
+          avgVisibility,
+          minVisibility,
+          maxVisibility,
+          lowVisibility,
+          visibilityBuckets: buckets,
+        },
         peering: {
           sharedIxps,
           ispIxps: ispIxData.ixCount,
           cfIxps: cfIxIds.size,
           likelyDirectPeering: sharedIxps > 0,
         },
+        score,
       };
 
       return Response.json({
         success: true,
         result,
         queryTime,
-        cloudflare: {
-          officialV4: cfIps.v4,
-          officialV6: cfIps.v6,
-          bgpPrefixCount: cfBgpEntries.length,
-          totalBgpVisibility: Math.round(
-            cfBgpEntries.reduce((sum, e) => sum + e.Hits, 0) /
-              cfBgpEntries.length,
-          ),
-        },
         bgpTableSize: bgpTable.length,
       });
     } catch (err) {
