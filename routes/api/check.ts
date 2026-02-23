@@ -3,6 +3,8 @@ import { define } from "../../utils.ts";
 const USER_AGENT =
   "cloudflare-network-monitor/1.0 - github.com/mikepage/cloudflare-network-monitor";
 
+const PEERINGDB_API_KEY = Deno.env.get("PEERINGDB_API_KEY") ?? "";
+
 const CLOUDFLARE_AS = 13335;
 
 interface BgpEntry {
@@ -87,9 +89,13 @@ async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
   }
 
   try {
+    const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+    if (PEERINGDB_API_KEY) {
+      headers["Authorization"] = `Api-Key ${PEERINGDB_API_KEY}`;
+    }
     const resp = await fetch(
       `https://www.peeringdb.com/api/netixlan?asn=${asn}`,
-      { headers: { "User-Agent": USER_AGENT } },
+      { headers },
     );
     if (!resp.ok) {
       console.warn(
