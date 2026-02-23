@@ -38,6 +38,9 @@ const NETWORKS: NetworkDef[] = [
   { asn: 13335, name: "Cloudflare" },
   { asn: 40401, name: "Backblaze" },
   { asn: 202053, name: "UpCloud" },
+  { asn: 396982, name: "Google Cloud" },
+  { asn: 16509, name: "AWS" },
+  { asn: 8075, name: "Azure" },
 ];
 
 // --- Deno KV persistence ---
