@@ -49,7 +49,7 @@ const NETWORKS: NetworkDef[] = [
   { asn: 8075, name: "Azure" },
   { asn: 40401, name: "Backblaze" },
   { asn: 13335, name: "Cloudflare" },
-  { asn: 396982, name: "Google Cloud" },
+  { asn: 15169, name: "Google" },
   { asn: 202053, name: "UpCloud" },
 ];
 
