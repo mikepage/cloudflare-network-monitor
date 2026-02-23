@@ -183,6 +183,30 @@ export default function NetworkMonitor() {
         ))}
       </div>
 
+      {/* Routing Note */}
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-5 mb-6">
+        <h3 class="text-xs font-medium text-amber-800 uppercase tracking-wider mb-2">
+          Cloudflare Plan-Tier Routing
+        </h3>
+        <div class="space-y-2 text-xs text-amber-900 leading-relaxed">
+          <p>
+            When a target network (e.g. Backblaze AS40401) is{" "}
+            <span class="font-medium">not present</span> at a local IXP,
+            Cloudflare must reach it via transit or a remote IXP where both
+            networks peer (e.g. AMS-IX). Cloudflare differentiates routing by
+            plan tier:{" "}
+            <span class="font-medium">Free</span> plans use best-effort routing
+            with deprioritized or unavailable cross-exchange paths, while{" "}
+            <span class="font-medium">Pro and above</span> get premium routing
+            with optimized transit and full cross-IXP reachability. This means
+            Free-tier users may experience connectivity issues to networks absent
+            from their local IXP, even when paid plans work fine. Incidents like
+            BYOIP disruptions further degrade the already-fragile Free-tier
+            paths.
+          </p>
+        </div>
+      </div>
+
       {/* BGP Stats */}
       <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div class="bg-white rounded-lg shadow p-4 text-center">
