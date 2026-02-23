@@ -18,14 +18,18 @@ interface IxpResult {
   id: number;
   name: string;
   country: string;
-  cfPresent: boolean;
-  peerPresent: boolean;
-  peered: boolean;
+}
+
+interface NetworkResult {
+  asn: number;
+  name: string;
+  totalIxps: number;
+  regionalIxps: IxpResult[];
 }
 
 interface CheckData {
-  peerAs: number;
   ixps: IxpResult[];
+  networks: NetworkResult[];
   bgp: {
     total: number;
     v4: number;
@@ -131,53 +135,64 @@ export default function NetworkMonitor() {
 
   if (!data.value) return null;
 
-  const { peerAs, ixps, bgp, cfIxpsGlobal, queryTime } = data.value;
+  const { ixps, networks, bgp, cfIxpsGlobal, queryTime } = data.value;
 
   return (
     <div class="w-full">
-      {/* IXP Grid */}
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {ixps.map((ixp) => (
-          <div
-            key={ixp.id}
-            class={`bg-white rounded-lg shadow p-5 border-2 ${
-              ixp.peered ? "border-green-200" : "border-transparent"
-            }`}
-          >
+      {/* Cloudflare IXP presence */}
+      <div class="bg-white rounded-lg shadow p-6 mb-6">
+        <h3 class="text-xs font-medium text-[#666] uppercase tracking-wider mb-4">
+          Cloudflare (AS13335) — Regional IXP Presence
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          {ixps.map((ixp) => (
+            <span
+              key={ixp.id}
+              class="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded bg-green-100 text-green-700"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
+              {COUNTRY_FLAGS[ixp.country] ?? ""} {ixp.name}
+            </span>
+          ))}
+        </div>
+        <p class="text-xs text-[#999] mt-3">
+          {cfIxpsGlobal} IXPs globally via PeeringDB
+        </p>
+      </div>
+
+      {/* Provider networks */}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {networks.map((net) => (
+          <div key={net.asn} class="bg-white rounded-lg shadow p-5">
             <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <span class="text-lg">
-                  {COUNTRY_FLAGS[ixp.country] ?? ""}
+              <div>
+                <span class="text-sm font-medium text-[#111] block">
+                  {net.name}
                 </span>
-                <div>
-                  <span class="text-sm font-medium text-[#111] block">
+                <span class="text-xs text-[#999]">AS{net.asn}</span>
+              </div>
+              <span class="text-xs text-[#999]">
+                {net.totalIxps} IXPs total
+              </span>
+            </div>
+            <div class="text-xs text-[#666] mb-2">Regional IXPs:</div>
+            {net.regionalIxps.length > 0 ? (
+              <div class="flex flex-wrap gap-1.5">
+                {net.regionalIxps.map((ixp) => (
+                  <span
+                    key={ixp.id}
+                    class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-100 text-green-700"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
                     {ixp.name}
                   </span>
-                  <span class="text-xs text-[#999]">
-                    {COUNTRY_NAMES[ixp.country] ?? ixp.country}
-                  </span>
-                </div>
+                ))}
               </div>
-              {ixp.peered ? (
-                <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-100 text-green-700">
-                  <span class="w-1.5 h-1.5 rounded-full bg-green-500" />
-                  Peered
-                </span>
-              ) : (
-                <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-600">
-                  <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
-                  Not peered
-                </span>
-              )}
-            </div>
-            <div class="flex gap-3 text-xs">
-              <span class={ixp.cfPresent ? "text-green-600" : "text-red-500"}>
-                {ixp.cfPresent ? "CF present" : "CF absent"}
+            ) : (
+              <span class="text-xs text-[#999]">
+                Not present at any monitored regional IXP
               </span>
-              <span class={ixp.peerPresent ? "text-green-600" : "text-red-500"}>
-                {ixp.peerPresent ? `AS${peerAs} present` : `AS${peerAs} absent`}
-              </span>
-            </div>
+            )}
           </div>
         ))}
       </div>

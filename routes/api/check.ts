@@ -4,7 +4,6 @@ const USER_AGENT =
   "cloudflare-network-monitor/1.0 - github.com/mikepage/cloudflare-network-monitor";
 
 const CLOUDFLARE_AS = 13335;
-const PEER_AS = 40401;
 
 interface BgpEntry {
   CIDR: string;
@@ -25,6 +24,17 @@ const REGIONAL_IXPS: RegionalIxp[] = [
   { id: 31, name: "DE-CIX Frankfurt", country: "DE" },
   { id: 297, name: "LU-CIX", country: "LU" },
   { id: 359, name: "France-IX Paris", country: "FR" },
+];
+
+// Networks to check IXP presence for
+interface NetworkDef {
+  asn: number;
+  name: string;
+}
+
+const NETWORKS: NetworkDef[] = [
+  { asn: 40401, name: "Backblaze" },
+  { asn: 202053, name: "UpCloud" },
 ];
 
 // --- Deno KV persistence ---
@@ -69,42 +79,6 @@ async function fetchBgpTable(): Promise<BgpEntry[]> {
   return entries;
 }
 
-async function fetchCloudflareIxIds(): Promise<Set<number>> {
-  const cached = await kv.get<number[]>(["peeringdb", "cf"]);
-  if (cached.value) {
-    return new Set(cached.value);
-  }
-
-  try {
-    const resp = await fetch(
-      `https://www.peeringdb.com/api/netixlan?asn=${CLOUDFLARE_AS}`,
-      { headers: { "User-Agent": USER_AGENT } },
-    );
-    if (!resp.ok) {
-      console.warn(`PeeringDB CF returned ${resp.status}, no cache available`);
-      return new Set();
-    }
-    const data = await resp.json();
-    if (data.meta?.error || !Array.isArray(data.data)) {
-      console.warn("PeeringDB CF rate limited, no cache available");
-      return new Set();
-    }
-    const ixIds = new Set<number>();
-    for (const entry of data.data) {
-      if (entry.ix_id) ixIds.add(entry.ix_id);
-    }
-    // Only cache if we got real data (CF is at 300+ IXPs)
-    if (ixIds.size > 0) {
-      await kv.set(["peeringdb", "cf"], [...ixIds], {
-        expireIn: PEERINGDB_CACHE_TTL,
-      });
-    }
-    return ixIds;
-  } catch {
-    return new Set();
-  }
-}
-
 async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
   const cached = await kv.get<number[]>(["peeringdb", "asn", asn]);
   if (cached.value) {
@@ -117,7 +91,9 @@ async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
       { headers: { "User-Agent": USER_AGENT } },
     );
     if (!resp.ok) {
-      console.warn(`PeeringDB AS${asn} returned ${resp.status}, no cache available`);
+      console.warn(
+        `PeeringDB AS${asn} returned ${resp.status}, no cache available`,
+      );
       return new Set();
     }
     const data = await resp.json();
@@ -129,9 +105,11 @@ async function fetchAsnIxIds(asn: number): Promise<Set<number>> {
     for (const entry of data.data) {
       if (entry.ix_id) ixIds.add(entry.ix_id);
     }
-    await kv.set(["peeringdb", "asn", asn], [...ixIds], {
-      expireIn: PEERINGDB_CACHE_TTL,
-    });
+    if (ixIds.size > 0) {
+      await kv.set(["peeringdb", "asn", asn], [...ixIds], {
+        expireIn: PEERINGDB_CACHE_TTL,
+      });
+    }
     return ixIds;
   } catch {
     return new Set();
@@ -144,9 +122,13 @@ interface IxpResult {
   id: number;
   name: string;
   country: string;
-  cfPresent: boolean;
-  peerPresent: boolean;
-  peered: boolean;
+}
+
+interface NetworkResult {
+  asn: number;
+  name: string;
+  totalIxps: number;
+  regionalIxps: IxpResult[];
 }
 
 interface CfPrefixInfo {
@@ -163,8 +145,8 @@ interface VisibilityBucket {
 }
 
 interface CheckResult {
-  peerAs: number;
   ixps: IxpResult[];
+  networks: NetworkResult[];
   bgp: {
     total: number;
     v4: number;
@@ -183,8 +165,8 @@ export const handler = define.handlers({
     try {
       const startTime = performance.now();
 
-      // Check for cached result (v2 includes peerAs)
-      const cachedResult = await kv.get<CheckResult>(["result", "ixps", "v2"]);
+      // Check for cached result
+      const cachedResult = await kv.get<CheckResult>(["result", "v3"]);
       if (cachedResult.value) {
         const queryTime = Math.round(performance.now() - startTime);
         return Response.json({
@@ -195,22 +177,35 @@ export const handler = define.handlers({
         });
       }
 
-      // Fetch BGP table, CF IXP presence, and peer IXP presence in parallel
-      const [bgpTable, cfIxIds, peerIxIds] = await Promise.all([
+      // Fetch all data in parallel
+      const [bgpTable, cfIxIds, ...networkIxIds] = await Promise.all([
         fetchBgpTable(),
-        fetchCloudflareIxIds(),
-        fetchAsnIxIds(PEER_AS),
+        fetchAsnIxIds(CLOUDFLARE_AS),
+        ...NETWORKS.map((n) => fetchAsnIxIds(n.asn)),
       ]);
 
-      // IXP presence
-      const ixps: IxpResult[] = REGIONAL_IXPS.map((ixp) => ({
-        id: ixp.id,
-        name: ixp.name,
-        country: ixp.country,
-        cfPresent: cfIxIds.has(ixp.id),
-        peerPresent: peerIxIds.has(ixp.id),
-        peered: cfIxIds.has(ixp.id) && peerIxIds.has(ixp.id),
-      }));
+      // Regional IXPs where Cloudflare is present
+      const ixps: IxpResult[] = REGIONAL_IXPS
+        .filter((ixp) => cfIxIds.has(ixp.id))
+        .map((ixp) => ({
+          id: ixp.id,
+          name: ixp.name,
+          country: ixp.country,
+        }));
+
+      // Network presence at regional IXPs
+      const networks: NetworkResult[] = NETWORKS.map((net, i) => {
+        const ixIds = networkIxIds[i];
+        const regionalIxps = REGIONAL_IXPS
+          .filter((ixp) => ixIds.has(ixp.id))
+          .map((ixp) => ({ id: ixp.id, name: ixp.name, country: ixp.country }));
+        return {
+          asn: net.asn,
+          name: net.name,
+          totalIxps: ixIds.size,
+          regionalIxps,
+        };
+      });
 
       // BGP stats
       const cfBgpEntries = bgpTable.filter((e) => e.ASN === CLOUDFLARE_AS);
@@ -257,8 +252,8 @@ export const handler = define.handlers({
       }
 
       const result: CheckResult = {
-        peerAs: PEER_AS,
         ixps,
+        networks,
         bgp: {
           total: cfBgpEntries.length,
           v4: v4Prefixes.length,
@@ -274,7 +269,7 @@ export const handler = define.handlers({
 
       // Only cache if we got valid CF IXP data
       if (cfIxIds.size > 0) {
-        await kv.set(["result", "ixps", "v2"], result, {
+        await kv.set(["result", "v3"], result, {
           expireIn: RESULT_CACHE_TTL,
         });
       }
