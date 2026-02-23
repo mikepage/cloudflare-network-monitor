@@ -154,18 +154,14 @@ export default function NetworkMonitor() {
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {ixps.map((ixp) => (
           <div key={ixp.id} class="bg-white rounded-lg shadow p-5">
-            <div class="flex items-center gap-2 mb-4">
-              <span class="text-lg">
-                {COUNTRY_FLAGS[ixp.country] ?? ""}
+            <div class="mb-4">
+              <span class="text-sm font-medium text-[#111] block">
+                {ixp.name}
               </span>
-              <div>
-                <span class="text-sm font-medium text-[#111] block">
-                  {ixp.name}
-                </span>
-                <span class="text-xs text-[#999]">
-                  {COUNTRY_NAMES[ixp.country] ?? ixp.country}
-                </span>
-              </div>
+              <span class="text-xs text-[#999]">
+                {COUNTRY_FLAGS[ixp.country] ?? ""}{" "}
+                {COUNTRY_NAMES[ixp.country] ?? ixp.country}
+              </span>
             </div>
             <div class="space-y-1.5">
               {ixp.networks.map((net) => (
