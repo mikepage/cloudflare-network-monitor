@@ -64,14 +64,18 @@ const ISP_LIST: IspInfo[] = [
 
 const kv = await Deno.openKv();
 
-const BGP_CACHE_TTL = 1800_000; // 30 min
 const PEERINGDB_CACHE_TTL = 86400_000; // 24h
 const RESULT_CACHE_TTL = 86400_000; // 24h
 
+// BGP table is too large for KV (>64KB), so keep it in-memory.
+// The 24h result cache means most requests skip this entirely.
+let bgpCache: { data: BgpEntry[]; timestamp: number } | null = null;
+const BGP_CACHE_TTL = 1800_000; // 30 min
+
 async function fetchBgpTable(): Promise<BgpEntry[]> {
-  const cached = await kv.get<BgpEntry[]>(["bgp", "table"]);
-  if (cached.value) {
-    return cached.value;
+  const now = Date.now();
+  if (bgpCache && now - bgpCache.timestamp < BGP_CACHE_TTL) {
+    return bgpCache.data;
   }
 
   const resp = await fetch("https://bgp.tools/table.jsonl", {
@@ -95,7 +99,7 @@ async function fetchBgpTable(): Promise<BgpEntry[]> {
     }
   }
 
-  await kv.set(["bgp", "table"], entries, { expireIn: BGP_CACHE_TTL });
+  bgpCache = { data: entries, timestamp: now };
   return entries;
 }
 
