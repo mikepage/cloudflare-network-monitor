@@ -635,6 +635,145 @@ export default function NetworkMonitor() {
                 </table>
               </div>
             </div>
+
+            {/* Status legend */}
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+              <h3 class="text-xs font-medium text-[#666] uppercase tracking-wider mb-4">
+                Status Legend
+              </h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-[#eee]">
+                      <th class="text-left px-4 py-2 text-xs font-medium text-[#666] uppercase tracking-wider w-36">
+                        Status
+                      </th>
+                      <th class="text-left px-4 py-2 text-xs font-medium text-[#666] uppercase tracking-wider">
+                        Meaning
+                      </th>
+                      <th class="text-left px-4 py-2 text-xs font-medium text-[#666] uppercase tracking-wider">
+                        Example
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-[#eee]">
+                    <tr>
+                      <td class="px-4 py-3">
+                        <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+                          exact match
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-[#666]">
+                        The official Cloudflare prefix is announced in BGP
+                        exactly as listed. This is the ideal state — the
+                        prefix Cloudflare publishes on their website matches
+                        what AS13335 advertises in the global routing table.
+                      </td>
+                      <td class="px-4 py-3">
+                        <code class="text-xs text-[#666] bg-[#f5f5f5] px-1.5 py-0.5 rounded">
+                          104.16.0.0/13
+                        </code>{" "}
+                        <span class="text-xs text-[#999]">
+                          is announced as{" "}
+                        </span>
+                        <code class="text-xs text-[#666] bg-[#f5f5f5] px-1.5 py-0.5 rounded">
+                          104.16.0.0/13
+                        </code>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3">
+                        <span class="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">
+                          deaggregated
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-[#666]">
+                        The official prefix is not announced as a single
+                        route, but Cloudflare announces smaller
+                        (more-specific) prefixes that together cover the
+                        range. This is common practice — networks split
+                        large blocks into smaller announcements for traffic
+                        engineering, DDoS mitigation, or regional routing
+                        control. Traffic still reaches Cloudflare, but via
+                        multiple routes instead of one aggregate.
+                      </td>
+                      <td class="px-4 py-3">
+                        <div>
+                          <code class="text-xs text-[#666] bg-[#f5f5f5] px-1.5 py-0.5 rounded">
+                            173.245.48.0/20
+                          </code>{" "}
+                          <span class="text-xs text-[#999]">
+                            is covered by:
+                          </span>
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-1">
+                          <code class="text-xs text-[#666] bg-[#f5f5f5] px-1.5 py-0.5 rounded">
+                            173.245.49.0/24
+                          </code>
+                          <code class="text-xs text-[#666] bg-[#f5f5f5] px-1.5 py-0.5 rounded">
+                            173.245.54.0/24
+                          </code>
+                          <span class="text-xs text-[#999]">etc.</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3">
+                        <span class="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700">
+                          not found
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-[#666]">
+                        The official Cloudflare prefix is not visible in the
+                        global BGP table — neither as an exact match nor as
+                        deaggregated more-specifics from AS13335. This means
+                        the IP range is not currently being routed and may be
+                        unreachable. This could indicate an outage,
+                        withdrawal, or misconfiguration on Cloudflare's side.
+                      </td>
+                      <td class="px-4 py-3 text-xs text-[#999]">
+                        No BGP route found for the prefix
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="mt-4 px-4 py-3 bg-[#fafafa] rounded-md">
+                <p class="text-xs text-[#666]">
+                  <span class="font-medium">Visibility</span> shows how many
+                  bgp.tools peer sessions observe the route. Higher values
+                  indicate better global propagation. The BGP table is sourced
+                  from{" "}
+                  <a
+                    href="https://bgp.tools/kb/api"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-blue-600 hover:underline"
+                  >
+                    bgp.tools
+                  </a>{" "}
+                  and official Cloudflare IP ranges from{" "}
+                  <a
+                    href="https://www.cloudflare.com/ips/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-blue-600 hover:underline"
+                  >
+                    cloudflare.com/ips
+                  </a>
+                  . Peering data is from{" "}
+                  <a
+                    href="https://www.peeringdb.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-blue-600 hover:underline"
+                  >
+                    PeeringDB
+                  </a>
+                  .
+                </p>
+              </div>
+            </div>
           </>
         );
       })()}
